@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Character Sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IM+Fell+English+SC&family=Alegreya+Sans:wght@400;500;700&family=Spline+Sans+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/sheet/sheet.css">
+<script src="../assets/sheet/sheet-engine.js"></script>
+</head>
+<body>
+<div class="sitebar">
+  <div><a href="../party/">← Party</a> · <a href="../">Home</a> · <a href="../log/">Adventure log</a></div>
+  <div class="who"><span class="sync" id="sync"></span><span id="who"></span><button type="button" id="signOutBtn" hidden>Sign out</button></div>
+</div>
+<div id="gate" class="gate" hidden></div>
+<div id="app"></div>
+
+<script type="module">
+import { isConfigured, watchSession, signIn, signOut, watchCharacter, saveState, saveBuild, deleteCharacter, esc, friendlyError } from "../assets/js/app.js";
+
+const params = new URLSearchParams(location.search);
+const id = params.get("id");
+const demo = params.get("demo");
+const gate = document.getElementById("gate"), appEl = document.getElementById("app"), syncEl = document.getElementById("sync");
+const showGate = html => { gate.innerHTML = html; gate.hidden = false; appEl.innerHTML = ""; };
+const setSync = (t, err) => { syncEl.textContent = t; syncEl.classList.toggle("err", !!err); };
+
+/* ---------- demo mode: no sign-in, saves in this browser only ---------- */
+if (demo) {
+  const key = "demo-sheet-" + demo;
+  fetch("../assets/examples/" + encodeURIComponent(demo) + ".json").then(r => { if (!r.ok) throw new Error("No example named " + demo); return r.json(); }).then(build => {
+    let state = null; try { state = JSON.parse(localStorage.getItem(key) || "null"); } catch (e) {}
+    document.title = build.name + " (demo)";
+    setSync("Demo: saves in this browser only");
+    SheetEngine.mount(appEl, { build, state, uiKey: key, onChange: s => { try { localStorage.setItem(key, JSON.stringify(s)); } catch (e) {} } });
+  }).catch(e => showGate(`<h1>Demo not found</h1><p>${esc(e.message)}</p>`));
+} else if (!isConfigured) {
+  showGate(`<h1>Almost ready</h1><p>Firebase isn't connected yet, so sheets can't load. Follow SETUP.md in the repository.</p><div class="btns"><a href="?demo=sample-fighter"><button type="button" class="primary">Try the demo sheet</button></a></div>`);
+} else if (!id) {
+  showGate(`<h1>No character chosen</h1><p>Pick a character from the party page.</p><div class="btns"><a href="../party/"><button type="button" class="primary">Go to the party</button></a></div>`);
+} else {
+  let sheet = null, unsub = null, lastBuildText = "", lastSent = "", timer = null, saving = false, me = null;
+
+  watchSession(({ user, email, member }) => {
+    document.getElementById("signOutBtn").hidden = !user;
+    document.getElementById("who").textContent = user ? (member ? member.name || email : email) : "";
+    if (unsub) { unsub(); unsub = null; }
+    if (!user) {
+      showGate(`<h1>Sign in</h1><p>Character sheets are for the party only.</p><div class="btns"><button type="button" class="primary" id="go">Sign in with Google</button></div><p id="err" class="sync err"></p>`);
+      document.getElementById("go").onclick = () => signIn().catch(e => document.getElementById("err").textContent = friendlyError(e));
+      return;
+    }
+    if (!member) return showGate(`<h1>Not on the party list yet</h1><p>You're signed in as ${esc(email)}. Ask the DM to add this Google account, then reload.</p>`);
+    me = { email, member, dm: member.role === "dm" };
+    gate.hidden = true;
+    unsub = watchCharacter(id, onDoc, e => showGate(`<h1>Can't load this sheet</h1><p>${esc(friendlyError(e))}</p>`));
+  });
+  document.getElementById("signOutBtn").onclick = () => signOut();
+
+  function canEdit(d) { return me && (me.dm || d.owner === me.email); }
+
+  function queueSave(state) {
+    const text = JSON.stringify(state);
+    if (text === lastSent) return;
+    setSync("Saving…");
+    saving = true;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      lastSent = text;
+      saveState(id, state).then(() => { saving = false; setSync("Saved"); })
+        .catch(e => { saving = false; setSync("Not saved: " + friendlyError(e), true); });
+    }, 600);
+  }
+
+  function onDoc(d) {
+    if (!d) return showGate(`<h1>Character not found</h1><p>It may have been deleted.</p><div class="btns"><a href="../party/"><button type="button">Back to the party</button></a></div>`);
+    const buildText = JSON.stringify(d.build);
+    if (!sheet || buildText !== lastBuildText) {
+      // first load, or the build changed: (re)mount, keeping the current state
+      const state = sheet ? sheet.getState() : d.state;
+      lastBuildText = buildText; lastSent = d.stateText;
+      document.title = (d.build.name || "Character") + " · Sheet";
+      sheet = SheetEngine.mount(appEl, {
+        build: d.build, state, uiKey: "sheet-" + id, readonly: !canEdit(d),
+        readonlyText: `Viewing ${d.build.name || "this character"} (played by ${d.ownerName || d.owner}). Only they or the DM can change it.`,
+        onChange: queueSave
+      });
+      if (canEdit(d)) addEditor(d);
+      setSync(canEdit(d) ? "Synced" : "Live view");
+      return;
+    }
+    // someone else changed the state (another device, or the DM)
+    if (!d.pending && !saving && d.stateText && d.stateText !== lastSent) {
+      lastSent = d.stateText;
+      sheet.setState(d.state);
+      setSync("Updated from another device");
+    }
+  }
+
+  /* ---------- build editor (owner or DM) ---------- */
+  function addEditor(d) {
+    const box = sheet.extraGear;
+    box.innerHTML = `<section class="editor">
+      <h2>Character build <small>stats, attacks, spells, features</small></h2>
+      <div class="note">This is the character itself, as JSON (see BUILD-FORMAT.md). Ask the DM or Claude to update it when you level up, then paste the new version here. HP, slots, and items you track above are kept.</div>
+      <div class="btns"><button type="button" id="edOpen">Edit build</button><button type="button" id="edCopy">Copy build</button></div>
+      <div id="edBody" hidden class="editor">
+        <textarea id="edText" spellcheck="false" aria-label="Character build JSON"></textarea>
+        <div class="btns"><button type="button" class="primary" id="edSave">Save build</button><button type="button" id="edCancel">Cancel</button></div>
+        <div class="err" id="edErr"></div>
+      </div>
+      <div class="btns" style="margin-top:6px"><button type="button" class="danger" id="delBtn">Delete character</button></div>
+      <div class="confirm" id="delConfirm" hidden>Delete ${esc(d.build.name || "this character")} for everyone? This can't be undone. <button type="button" class="danger" id="delYes">Yes, delete</button><button type="button" id="delNo">Cancel</button></div>
+      <div class="note" id="edMsg" aria-live="polite"></div>
+    </section>`;
+    const $ = s => box.querySelector(s);
+    $("#edOpen").onclick = () => { $("#edText").value = JSON.stringify(d.build, null, 2); $("#edBody").hidden = false; $("#edErr").textContent = ""; };
+    $("#edCancel").onclick = () => { $("#edBody").hidden = true; };
+    $("#edCopy").onclick = () => navigator.clipboard.writeText(JSON.stringify(d.build, null, 2)).then(() => $("#edMsg").textContent = "Build copied.", () => $("#edMsg").textContent = "Couldn't copy. Use Edit build and copy the text.");
+    $("#edSave").onclick = () => {
+      let b; try { b = JSON.parse($("#edText").value); } catch (e) { $("#edErr").textContent = "That isn't valid JSON: " + e.message; return; }
+      if (!b || typeof b !== "object" || !b.name) { $("#edErr").textContent = "The build needs at least a \"name\"."; return; }
+      $("#edErr").textContent = ""; setSync("Saving build…");
+      saveBuild(id, b).then(() => setSync("Build saved")).catch(e => { $("#edErr").textContent = friendlyError(e); setSync("Build not saved", true); });
+    };
+    $("#delBtn").onclick = () => { $("#delConfirm").hidden = false; };
+    $("#delNo").onclick = () => { $("#delConfirm").hidden = true; };
+    $("#delYes").onclick = () => deleteCharacter(id).then(() => location.href = "../party/").catch(e => $("#edMsg").textContent = friendlyError(e));
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,126 @@
+---
+title: Party
+---
+<p class="eyebrow">Character sheets</p>
+<div class="row" style="justify-content:space-between">
+  <h1>The party</h1>
+  <div class="row"><span class="note" id="who"></span><button type="button" id="signOutBtn" hidden>Sign out</button></div>
+</div>
+
+<div id="gate" class="card"><p>Loading…</p></div>
+
+<div id="main" hidden>
+  <p class="lede">Open a sheet to play. You can change your own characters; everyone else's open read-only.</p>
+  <div class="grid" id="roster"></div>
+
+  <h2>New character</h2>
+  <div class="card" style="display:grid;gap:10px">
+    <p class="note" style="margin:0">Paste a build that Claude or the DM wrote for you, or start from the sample fighter and edit it later from the sheet's <b>Gear &amp; notes</b> tab. The format is described in BUILD-FORMAT.md in the repository.</p>
+    <textarea id="newBuild" rows="8" spellcheck="false" placeholder='{ "name": "Your character", ... }' aria-label="Character build JSON"></textarea>
+    <div class="row">
+      <button type="button" class="primary" id="createBtn">Create from pasted build</button>
+      <button type="button" id="sampleBtn">Start from the sample fighter</button>
+    </div>
+    <div class="note err" id="newErr"></div>
+  </div>
+
+  <section id="dmPanel" hidden>
+    <h2>Players <small class="note">(DM only)</small></h2>
+    <div class="card" style="display:grid;gap:12px">
+      <p class="note" style="margin:0">Only Google accounts on this list can sign in and see sheets. Remove someone and they lose access right away; their characters stay.</p>
+      <table><thead><tr><th>Name</th><th>Google account</th><th>Role</th><th></th></tr></thead><tbody id="members"></tbody></table>
+      <form class="row" id="addMember">
+        <input id="mName" placeholder="Name" required aria-label="Player name">
+        <input id="mEmail" type="email" placeholder="name@gmail.com" required aria-label="Google account email" style="flex:1;min-width:200px">
+        <select id="mRole" aria-label="Role"><option value="player">Player</option><option value="dm">DM</option></select>
+        <button type="submit" class="primary">Add player</button>
+      </form>
+      <div class="note err" id="mErr"></div>
+    </div>
+  </section>
+</div>
+
+<script type="module">
+import { isConfigured, watchSession, signIn, signOut, watchCharacters, createCharacter, watchMembers, addMember, removeMember, esc, friendlyError } from "{{ '/assets/js/app.js' | relative_url }}";
+const SHEET = "{{ '/sheet/' | relative_url }}";
+const SAMPLE = "{{ '/assets/examples/sample-fighter.json' | relative_url }}";
+const $ = id => document.getElementById(id);
+let me = null, stopChars = null, stopMembers = null;
+
+if (!isConfigured) {
+  $("gate").innerHTML = `<p>Firebase isn't connected yet, so the party can't load. Follow SETUP.md in the repository.</p><p><a class="btn primary" href="${SHEET}?demo=sample-fighter">Try the demo sheet</a></p>`;
+} else {
+  watchSession(({ user, email, member }) => {
+    if (stopChars) { stopChars(); stopChars = null; }
+    if (stopMembers) { stopMembers(); stopMembers = null; }
+    $("signOutBtn").hidden = !user;
+    $("who").textContent = user ? "Signed in as " + (member && member.name ? member.name : email) : "";
+    $("main").hidden = true; $("gate").hidden = false;
+    if (!user) {
+      $("gate").innerHTML = `<p>Sheets are for the party only. Sign in with the Google account you gave the DM.</p><p><button type="button" class="primary" id="go">Sign in with Google</button></p><p class="err" id="err"></p>`;
+      $("go").onclick = () => signIn().catch(e => $("err").textContent = friendlyError(e));
+      return;
+    }
+    if (!member) {
+      $("gate").innerHTML = `<p>You're signed in as <b>${esc(email)}</b>, but that account isn't on the party list yet. Ask the DM to add it, then reload this page.</p>`;
+      return;
+    }
+    me = { email, name: member.name || email, dm: member.role === "dm" };
+    $("gate").hidden = true; $("main").hidden = false;
+    $("dmPanel").hidden = !me.dm;
+    stopChars = watchCharacters(renderRoster, e => $("roster").innerHTML = `<p class="err">${esc(friendlyError(e))}</p>`);
+    if (me.dm) stopMembers = watchMembers(renderMembers);
+  });
+  $("signOutBtn").onclick = () => signOut();
+}
+
+function renderRoster(list) {
+  if (!list.length) { $("roster").innerHTML = `<div class="card"><p>No characters yet. Make the first one below.</p></div>`; return; }
+  $("roster").innerHTML = list.map(c => {
+    const mine = c.owner === me.email, max = c.maxHp || 1, hp = c.hp == null ? max : c.hp, pct = Math.max(0, Math.min(100, hp / max * 100));
+    const col = pct > 50 ? "var(--good)" : pct > 25 ? "var(--gold)" : "var(--bad)";
+    return `<a class="card char ${mine ? "mine" : ""}" href="${SHEET}?id=${encodeURIComponent(c.id)}">
+      <p class="eyebrow">${mine ? "Your character" : "Played by " + esc(c.ownerName || c.owner)}</p>
+      <h3>${esc(c.name)}</h3>
+      <div class="note">${esc(c.summary || "")}</div>
+      <div class="hp">HP ${hp} / ${max}${c.temp ? ` (+${c.temp} temp)` : ""}</div>
+      <div class="bar"><i style="width:${pct}%;background:${col}"></i></div>
+    </a>`;
+  }).join("");
+}
+
+async function create(build) {
+  $("newErr").textContent = "";
+  if (!build || typeof build !== "object" || !build.name) { $("newErr").textContent = "The build needs at least a \"name\"."; return; }
+  try { const id = await createCharacter(me.email, me.name, build); location.href = `${SHEET}?id=${encodeURIComponent(id)}`; }
+  catch (e) { $("newErr").textContent = friendlyError(e); }
+}
+$("createBtn").onclick = () => {
+  let b; try { b = JSON.parse($("newBuild").value); } catch (e) { $("newErr").textContent = "That isn't valid JSON: " + e.message; return; }
+  create(b);
+};
+$("sampleBtn").onclick = async () => {
+  const b = await fetch(SAMPLE).then(r => r.json());
+  const name = prompt("Name your character:", "New adventurer");
+  if (name === null) return;
+  b.name = name.trim() || b.name;
+  create(b);
+};
+
+function renderMembers(list) {
+  list.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+  $("members").innerHTML = list.map(m => `<tr><td>${esc(m.name || "")}</td><td>${esc(m.email)}</td><td>${m.role === "dm" ? "DM" : "Player"}</td>
+    <td>${m.email === me.email ? "" : `<button type="button" class="danger" data-rm="${esc(m.email)}">Remove</button>`}</td></tr>`).join("");
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-rm]"); if (!b) return;
+  if (!confirm(`Remove ${b.dataset.rm} from the party list?`)) return;
+  removeMember(b.dataset.rm).catch(err => $("mErr").textContent = friendlyError(err));
+});
+$("addMember").addEventListener("submit", e => {
+  e.preventDefault(); $("mErr").textContent = "";
+  addMember($("mEmail").value, $("mName").value, $("mRole").value)
+    .then(() => { $("mEmail").value = ""; $("mName").value = ""; $("mRole").value = "player"; })
+    .catch(err => $("mErr").textContent = friendlyError(err));
+});
+</script>

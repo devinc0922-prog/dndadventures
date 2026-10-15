@@ -1,0 +1,21 @@
+---
+title: Adventure log
+---
+<p class="eyebrow">Every session, newest first</p>
+<h1>Adventure log</h1>
+<p class="lede">Recaps written after each session. Missed one? Start here.</p>
+
+{% assign sessions = site.sessions | sort: "date" | reverse %}
+{% if sessions.size > 0 %}
+<ul class="loglist">
+  {% for s in sessions %}
+  <li class="card"><a href="{{ s.url | relative_url }}">
+    <p class="eyebrow">Session {{ s.session }} · {{ s.date | date: "%B %-d, %Y" }}{% if s.party %} · {{ s.party | join: ", " }}{% endif %}</p>
+    <h3>{{ s.title }}</h3>
+    {% if s.summary %}<p>{{ s.summary }}</p>{% endif %}
+  </a></li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="card"><p>No sessions yet. The first recap will show up here after Session 1.</p></div>
+{% endif %}

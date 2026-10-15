@@ -1,0 +1,29 @@
+title: DnD Adventures
+description: A Claude-led D&D 5e campaign. Adventure log, house rules, and the party's character sheets.
+baseurl: "/dndadventures"
+url: "https://devinc0922-prog.github.io"
+markdown: kramdown
+
+collections:
+  sessions:
+    output: true
+    permalink: /log/:name/
+
+defaults:
+  - scope: { path: "", type: sessions }
+    values: { layout: session }
+  - scope: { path: "" }
+    values: { layout: default }
+
+exclude:
+  - README.md
+  - SETUP.md
+  - BUILD-FORMAT.md
+  - CLAUDE.md
+  - SESSION-TEMPLATE.md
+  - firestore.rules
+  - firebase.json
+  - tests
+  - node_modules
+  - package.json
+  - package-lock.json

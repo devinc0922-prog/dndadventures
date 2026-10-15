@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "name": "Sample Fighter",
+  "tagline": "Human · Soldier · Level 3",
+  "classLine": "Fighter 3 (Champion)",
+  "level": 3,
+  "maxHp": 28,
+  "ac": 18,
+  "speed": 30,
+  "abilities": {"STR": 16, "DEX": 14, "CON": 14, "INT": 10, "WIS": 12, "CHA": 8},
+  "saveProf": ["STR", "CON"],
+  "skillProf": ["Athletics", "Intimidation", "Perception", "Survival"],
+  "critMin": 19,
+  "hitDice": [{"die": 10, "count": 3, "label": "Fighter"}],
+  "riders": [],
+  "attacks": [
+    {"name": "Longsword", "tags": [["Action", "act"]], "summary": "+5 · 1d8+5 slashing (Dueling)",
+     "buttons": [
+       {"label": "Attack", "attack": 5, "primary": true},
+       {"label": "Damage", "damage": "1d8 slashing + 5"}
+     ]},
+    {"name": "Longbow", "tags": [["Action", "act"]], "summary": "+4 · 1d8+2 piercing · 150/600 ft",
+     "buttons": [
+       {"label": "Shoot", "attack": 4, "consume": "Arrows", "primary": true},
+       {"label": "Damage", "damage": "1d8 piercing + 2"}
+     ]}
+  ],
+  "resources": [
+    {"id": "secondwind", "name": "Second Wind", "tag": ["Bonus action", "bonus"], "max": 1, "reset": "short",
+     "note": "Regain 1d10 + 3 HP.", "actions": [{"label": "Use", "roll": "1d10 + 3", "healSelf": true}]},
+    {"id": "surge", "name": "Action Surge", "tag": ["Free", "free"], "max": 1, "reset": "short", "gold": true,
+     "note": "Take one additional action on your turn.", "actions": [{"label": "Surge", "log": "one extra action this turn."}]}
+  ],
+  "traits": [
+    "Fighting style: Dueling (+2 damage with a one-handed weapon, included)",
+    "Improved Critical: crit on 19-20 (included)",
+    "Languages: Common, Dwarvish"
+  ],
+  "inventory": [
+    {"n": "Longsword", "q": 1, "eq": 1},
+    {"n": "Chain mail", "q": 1, "eq": 1, "d": "AC 16. Disadvantage on Stealth checks."},
+    {"n": "Shield", "q": 1, "eq": 1, "d": "+2 AC."},
+    {"n": "Longbow", "q": 1},
+    {"n": "Arrows", "q": 20},
+    {"n": "Potion of healing", "q": 2, "potion": "2d4 + 2", "d": "Action to drink: regain 2d4 + 2 HP."},
+    {"n": "Explorer's pack", "q": 1}
+  ],
+  "coins": {"gp": 15}
+}
